@@ -1,0 +1,984 @@
+```html
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Pixel Survival</title>
+
+<style>
+*{
+    box-sizing:border-box;
+    -webkit-tap-highlight-color:transparent;
+}
+
+html,body{
+    margin:0;
+    width:100%;
+    height:100%;
+    overflow:hidden;
+    background:#111;
+    font-family:Arial,sans-serif;
+    touch-action:none;
+}
+
+#game{
+    position:relative;
+    width:100%;
+    height:100%;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+}
+
+canvas{
+    display:block;
+    width:100%;
+    height:100%;
+    image-rendering:pixelated;
+    background:#6bc5ff;
+}
+
+#hud{
+    position:absolute;
+    top:10px;
+    left:50%;
+    transform:translateX(-50%);
+    display:none;
+    gap:12px;
+    padding:10px 15px;
+    background:rgba(0,0,0,.75);
+    color:white;
+    border:2px solid white;
+    border-radius:10px;
+    z-index:10;
+    white-space:nowrap;
+    font-weight:bold;
+}
+
+.screen{
+    position:absolute;
+    inset:0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:rgba(0,0,0,.78);
+    z-index:100;
+}
+
+.hidden{
+    display:none!important;
+}
+
+.menu{
+    width:min(90%,430px);
+    padding:30px;
+    text-align:center;
+    color:white;
+    background:#202020;
+    border:4px solid white;
+    border-radius:16px;
+}
+
+.menu h1{
+    margin:0 0 10px;
+    font-size:30px;
+}
+
+.menu p{
+    color:#ddd;
+}
+
+button{
+    border:0;
+    border-radius:10px;
+    padding:15px;
+    font-size:18px;
+    font-weight:bold;
+    cursor:pointer;
+    background:#ffd43b;
+    color:#111;
+    touch-action:manipulation;
+    user-select:none;
+}
+
+.menu button{
+    width:100%;
+    margin-top:15px;
+}
+
+button:active{
+    transform:scale(.94);
+}
+
+#waveText{
+    position:absolute;
+    top:25%;
+    left:50%;
+    transform:translate(-50%,-50%);
+    color:white;
+    font-size:42px;
+    font-weight:bold;
+    text-shadow:4px 4px #000;
+    display:none;
+    z-index:20;
+    pointer-events:none;
+}
+
+#controls{
+    position:absolute;
+    inset:0;
+    display:none;
+    z-index:30;
+    pointer-events:none;
+}
+
+.controlGroup{
+    position:absolute;
+    bottom:20px;
+    display:flex;
+    gap:10px;
+    pointer-events:auto;
+}
+
+#move{
+    left:20px;
+}
+
+#action{
+    right:20px;
+}
+
+.controlGroup button{
+    width:65px;
+    height:65px;
+    padding:0;
+    border-radius:50%;
+    color:white;
+    background:rgba(0,0,0,.45);
+    border:2px solid white;
+}
+
+@media(max-width:700px){
+    #hud{
+        font-size:12px;
+        gap:7px;
+        padding:8px;
+    }
+
+    .menu h1{
+        font-size:24px;
+    }
+
+    #waveText{
+        font-size:32px;
+    }
+}
+</style>
+</head>
+
+<body>
+
+<div id="game">
+
+<canvas id="canvas"></canvas>
+
+<div id="hud">
+    ❤️ <span id="hp">100</span>
+    ⚔️ <span id="weapon">Kiếm</span>
+    💀 <span id="kills">0</span>
+    🌊 Đợt <span id="wave">1</span>
+</div>
+
+<div id="start" class="screen">
+    <div class="menu">
+        <h1>⚔️ PIXEL SURVIVAL</h1>
+        <p>Tiêu diệt quái, nhặt vũ khí và sống sót!</p>
+        <button id="play">▶ CHƠI NGAY</button>
+    </div>
+</div>
+
+<div id="over" class="screen hidden">
+    <div class="menu">
+        <h1>💀 GAME OVER</h1>
+        <p>Hạ được <b id="endKills">0</b> quái</p>
+        <p>Sống tới đợt <b id="endWave">1</b></p>
+        <button id="again">🔄 CHƠI LẠI</button>
+    </div>
+</div>
+
+<div id="waveText">ĐỢT 1</div>
+
+<div id="controls">
+
+    <div id="move" class="controlGroup">
+        <button id="left">◀</button>
+        <button id="right">▶</button>
+    </div>
+
+    <div id="action" class="controlGroup">
+        <button id="attack">⚔️</button>
+        <button id="jump">⬆️</button>
+    </div>
+
+</div>
+
+</div>
+
+<script>
+
+const canvas=document.getElementById("canvas");
+const ctx=canvas.getContext("2d");
+
+function resize(){
+    canvas.width=960;
+    canvas.height=540;
+}
+resize();
+
+const start=document.getElementById("start");
+const over=document.getElementById("over");
+const hud=document.getElementById("hud");
+const controls=document.getElementById("controls");
+
+const hpEl=document.getElementById("hp");
+const weaponEl=document.getElementById("weapon");
+const killsEl=document.getElementById("kills");
+const waveEl=document.getElementById("wave");
+
+const endKills=document.getElementById("endKills");
+const endWave=document.getElementById("endWave");
+const waveText=document.getElementById("waveText");
+
+let running=false;
+let keys={};
+let wave=1;
+let kills=0;
+let camera=0;
+let nextWaveTimer=0;
+
+let enemies=[];
+let drops=[];
+
+const player={
+    x:200,
+    y:400,
+    w:36,
+    h:50,
+    vx:0,
+    vy:0,
+    speed:5,
+    jump:-13,
+    hp:100,
+    maxHp:100,
+    ground:false,
+    direction:1,
+    attacking:false
+};
+
+const weapons={
+    sword:{
+        name:"Kiếm",
+        damage:30,
+        range:75,
+        cooldown:18,
+        color:"#eee"
+    },
+
+    fire:{
+        name:"🔥 Kiếm Lửa",
+        damage:55,
+        range:90,
+        cooldown:17,
+        color:"#ff6500"
+    },
+
+    axe:{
+        name:"🪓 Rìu",
+        damage:80,
+        range:75,
+        cooldown:35,
+        color:"#aaa"
+    },
+
+    bow:{
+        name:"🏹 Cung",
+        damage:40,
+        range:280,
+        cooldown:25,
+        color:"#8b5a2b"
+    }
+};
+
+let weapon=weapons.sword;
+let attackCooldown=0;
+
+const platforms=[
+    {x:0,y:490,w:5000,h:50},
+    {x:350,y:390,w:180,h:20},
+    {x:850,y:340,w:180,h:20},
+    {x:1350,y:390,w:180,h:20},
+    {x:1850,y:330,w:180,h:20},
+    {x:2400,y:380,w:180,h:20}
+];
+
+
+// =========================
+// START
+// =========================
+
+document.getElementById("play").onclick=()=>{
+    startGame();
+};
+
+document.getElementById("again").onclick=()=>{
+    startGame();
+};
+
+function startGame(){
+
+    running=true;
+
+    wave=1;
+    kills=0;
+    camera=0;
+    nextWaveTimer=0;
+
+    player.x=200;
+    player.y=400;
+    player.vx=0;
+    player.vy=0;
+    player.hp=100;
+
+    weapon=weapons.sword;
+    attackCooldown=0;
+
+    start.classList.add("hidden");
+    over.classList.add("hidden");
+
+    hud.style.display="flex";
+
+    if("ontouchstart" in window){
+        controls.style.display="block";
+    }
+
+    spawnWave();
+    showWave();
+
+    updateHUD();
+}
+
+
+// =========================
+// SPAWN
+// =========================
+
+function spawnWave(){
+
+    enemies=[];
+    drops=[];
+
+    let amount=3+(wave-1)*2;
+
+    for(let i=0;i<amount;i++){
+
+        let hp=50+(wave-1)*15;
+
+        enemies.push({
+            x:700+Math.random()*3000,
+            y:435,
+            w:38,
+            h:55,
+            hp:hp,
+            maxHp:hp,
+            speed:.7+wave*.04,
+            attack:0,
+            dead:false
+        });
+    }
+}
+
+
+// =========================
+// WAVE
+// =========================
+
+function showWave(){
+
+    waveText.textContent="🌊 ĐỢT "+wave;
+    waveText.style.display="block";
+
+    setTimeout(()=>{
+        waveText.style.display="none";
+    },1500);
+}
+
+
+// =========================
+// UPDATE
+// =========================
+
+function update(){
+
+    if(!running)return;
+
+    player.vx=0;
+
+    if(keys.left){
+        player.vx=-player.speed;
+        player.direction=-1;
+    }
+
+    if(keys.right){
+        player.vx=player.speed;
+        player.direction=1;
+    }
+
+    player.x+=player.vx;
+
+    player.vy+=.6;
+    player.y+=player.vy;
+
+    player.ground=false;
+
+    for(const p of platforms){
+
+        if(
+            player.x<p.x+p.w &&
+            player.x+player.w>p.x &&
+            player.y+player.h>=p.y &&
+            player.y+player.h<=p.y+25 &&
+            player.vy>=0
+        ){
+            player.y=p.y-player.h;
+            player.vy=0;
+            player.ground=true;
+        }
+    }
+
+    if(
+        keys.jump &&
+        player.ground
+    ){
+        player.vy=player.jump;
+        keys.jump=false;
+    }
+
+    if(attackCooldown>0)
+        attackCooldown--;
+
+    if(player.attacking){
+        player.attackTimer--;
+
+        if(player.attackTimer<=0)
+            player.attacking=false;
+    }
+
+    let alive=0;
+
+    for(const e of enemies){
+
+        if(e.dead)continue;
+
+        alive++;
+
+        if(e.x<player.x-25)
+            e.x+=e.speed;
+
+        if(e.x>player.x+25)
+            e.x-=e.speed;
+
+        if(e.attack>0)
+            e.attack--;
+
+        if(
+            Math.abs(e.x-player.x)<45 &&
+            Math.abs(e.y-player.y)<55 &&
+            e.attack<=0
+        ){
+            player.hp-=8;
+            e.attack=60;
+            updateHUD();
+        }
+    }
+
+    updateDrops();
+
+    if(alive===0){
+
+        if(nextWaveTimer<=0){
+
+            nextWaveTimer=120;
+        }else{
+
+            nextWaveTimer--;
+
+            if(nextWaveTimer===0){
+
+                wave++;
+                spawnWave();
+                showWave();
+                updateHUD();
+            }
+        }
+    }
+
+    camera=player.x-480;
+
+    if(camera<0)camera=0;
+
+    if(player.hp<=0){
+        gameOver();
+    }
+
+    if(player.y>650){
+        player.hp=0;
+        gameOver();
+    }
+}
+
+
+// =========================
+// ATTACK
+// =========================
+
+function attack(){
+
+    if(!running)return;
+
+    if(attackCooldown>0)return;
+
+    player.attacking=true;
+    player.attackTimer=12;
+
+    attackCooldown=weapon.cooldown;
+
+    for(const e of enemies){
+
+        if(e.dead)continue;
+
+        const dx=e.x-player.x;
+
+        const inDirection=
+            player.direction===1
+            ? dx>-15
+            : dx<15;
+
+        if(
+            Math.abs(dx)<=weapon.range &&
+            inDirection &&
+            Math.abs(e.y-player.y)<75
+        ){
+
+            e.hp-=weapon.damage;
+
+            if(e.hp<=0)
+                killEnemy(e);
+        }
+    }
+}
+
+
+// =========================
+// KILL
+// =========================
+
+function killEnemy(e){
+
+    e.dead=true;
+    kills++;
+
+    // 35% rơi máu
+    if(Math.random()<.35){
+
+        drops.push({
+            x:e.x,
+            y:e.y,
+            type:"heal"
+        });
+    }
+
+    // 30% rơi vũ khí
+    if(Math.random()<.30){
+
+        const list=["fire","axe","bow"];
+
+        drops.push({
+            x:e.x+25,
+            y:e.y,
+            type:"weapon",
+            weapon:list[
+                Math.floor(Math.random()*list.length)
+            ]
+        });
+    }
+
+    updateHUD();
+}
+
+
+// =========================
+// DROPS
+// =========================
+
+function updateDrops(){
+
+    for(const d of drops){
+
+        if(d.collected)continue;
+
+        if(
+            Math.abs(player.x-d.x)<45 &&
+            Math.abs(player.y-d.y)<65
+        ){
+
+            d.collected=true;
+
+            if(d.type==="heal"){
+
+                player.hp+=25;
+
+                if(player.hp>player.maxHp)
+                    player.hp=player.maxHp;
+            }
+
+            if(d.type==="weapon"){
+
+                weapon=weapons[d.weapon];
+            }
+
+            updateHUD();
+        }
+    }
+}
+
+
+// =========================
+// HUD
+// =========================
+
+function updateHUD(){
+
+    hpEl.textContent=Math.max(0,Math.round(player.hp));
+    weaponEl.textContent=weapon.name;
+    killsEl.textContent=kills;
+    waveEl.textContent=wave;
+}
+
+
+// =========================
+// GAME OVER
+// =========================
+
+function gameOver(){
+
+    if(!running)return;
+
+    running=false;
+
+    controls.style.display="none";
+
+    endKills.textContent=kills;
+    endWave.textContent=wave;
+
+    over.classList.remove("hidden");
+}
+
+
+// =========================
+// DRAW
+// =========================
+
+function draw(){
+
+    ctx.clearRect(0,0,960,540);
+
+    // SKY
+    ctx.fillStyle="#65c5f5";
+    ctx.fillRect(0,0,960,540);
+
+    // SUN
+    ctx.fillStyle="#ffd43b";
+    ctx.beginPath();
+    ctx.arc(800,80,45,0,Math.PI*2);
+    ctx.fill();
+
+    ctx.save();
+    ctx.translate(-camera,0);
+
+    // CLOUDS
+    ctx.fillStyle="rgba(255,255,255,.7)";
+
+    for(let i=0;i<10;i++){
+
+        ctx.fillRect(
+            i*450,
+            70+(i%3)*45,
+            100,
+            25
+        );
+    }
+
+    // PLATFORMS
+    for(const p of platforms){
+
+        ctx.fillStyle="#684225";
+        ctx.fillRect(p.x,p.y,p.w,p.h);
+
+        ctx.fillStyle="#42a83b";
+        ctx.fillRect(p.x,p.y,p.w,10);
+    }
+
+    // DROPS
+    for(const d of drops){
+
+        if(d.collected)continue;
+
+        if(d.type==="heal"){
+
+            ctx.fillStyle="#e53935";
+
+            ctx.fillRect(
+                d.x-10,
+                d.y-10,
+                20,
+                20
+            );
+
+            ctx.fillStyle="white";
+
+            ctx.fillRect(
+                d.x-3,
+                d.y-8,
+                6,
+                16
+            );
+
+            ctx.fillRect(
+                d.x-8,
+                d.y-3,
+                16,
+                6
+            );
+        }
+
+        if(d.type==="weapon"){
+
+            ctx.fillStyle="#ffd43b";
+
+            ctx.beginPath();
+            ctx.arc(
+                d.x,
+                d.y,
+                14,
+                0,
+                Math.PI*2
+            );
+            ctx.fill();
+
+            ctx.fillStyle="#111";
+            ctx.fillRect(
+                d.x-3,
+                d.y-10,
+                6,
+                20
+            );
+        }
+    }
+
+    // ENEMIES
+    for(const e of enemies){
+
+        if(e.dead)continue;
+
+        ctx.fillStyle="#9135d8";
+
+        ctx.fillRect(
+            e.x,
+            e.y,
+            e.w,
+            e.h
+        );
+
+        ctx.fillStyle="white";
+
+        ctx.fillRect(
+            e.x+7,
+            e.y+12,
+            7,
+            7
+        );
+
+        ctx.fillRect(
+            e.x+24,
+            e.y+12,
+            7,
+            7
+        );
+
+        // HP BAR
+        ctx.fillStyle="#111";
+
+        ctx.fillRect(
+            e.x,
+            e.y-10,
+            e.w,
+            6
+        );
+
+        ctx.fillStyle="#39d353";
+
+        ctx.fillRect(
+            e.x,
+            e.y-10,
+            e.w*(e.hp/e.maxHp),
+            6
+        );
+    }
+
+    // PLAYER
+    ctx.fillStyle="#ff4545";
+
+    ctx.fillRect(
+        player.x,
+        player.y,
+        player.w,
+        player.h
+    );
+
+    // EYES
+    ctx.fillStyle="white";
+
+    ctx.fillRect(
+        player.x+7,
+        player.y+10,
+        7,
+        7
+    );
+
+    ctx.fillRect(
+        player.x+22,
+        player.y+10,
+        7,
+        7
+    );
+
+    // WEAPON
+    if(player.attacking){
+
+        ctx.fillStyle=weapon.color;
+
+        if(player.direction===1){
+
+            ctx.fillRect(
+                player.x+30,
+                player.y+20,
+                55,
+                8
+            );
+
+        }else{
+
+            ctx.fillRect(
+                player.x-50,
+                player.y+20,
+                55,
+                8
+            );
+        }
+    }
+
+    ctx.restore();
+}
+
+
+// =========================
+// KEYBOARD
+// =========================
+
+window.addEventListener("keydown",e=>{
+
+    if(e.key==="a"||e.key==="ArrowLeft")
+        keys.left=true;
+
+    if(e.key==="d"||e.key==="ArrowRight")
+        keys.right=true;
+
+    if(
+        e.key==="w"||
+        e.key==="ArrowUp"||
+        e.key===" "
+    )
+        keys.jump=true;
+
+    if(e.key==="j"||e.key==="J")
+        attack();
+});
+
+window.addEventListener("keyup",e=>{
+
+    if(e.key==="a"||e.key==="ArrowLeft")
+        keys.left=false;
+
+    if(e.key==="d"||e.key==="ArrowRight")
+        keys.right=false;
+});
+
+
+// =========================
+// MOBILE
+// =========================
+
+function hold(id,key){
+
+    const b=document.getElementById(id);
+
+    b.addEventListener("pointerdown",e=>{
+        e.preventDefault();
+        keys[key]=true;
+    });
+
+    b.addEventListener("pointerup",e=>{
+        e.preventDefault();
+        keys[key]=false;
+    });
+
+    b.addEventListener("pointercancel",()=>{
+        keys[key]=false;
+    });
+
+    b.addEventListener("pointerleave",()=>{
+        keys[key]=false;
+    });
+}
+
+hold("left","left");
+hold("right","right");
+hold("jump","jump");
+
+document.getElementById("attack")
+.addEventListener("pointerdown",e=>{
+    e.preventDefault();
+    attack();
+});
+
+
+// =========================
+// LOOP
+// =========================
+
+function loop(){
+
+    update();
+    draw();
+
+    requestAnimationFrame(loop);
+}
+
+loop();
+
+</script>
+
+</body>
+</html>
+```
